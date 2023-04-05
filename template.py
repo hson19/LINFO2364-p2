@@ -24,21 +24,23 @@ class Spade:
         if dic == None:
             print("Dic is None !")
             return
-        print(dic)
+
         new_dic = {k: v[2] for k, v in sorted(
             dic.items(), reverse=True, key=lambda item: item[1][2])}
         k = 0
         keys = list(new_dic.keys())
-        print(new_dic)
+
         iter = 0
         while (k < self.k):
 
             count = new_dic[keys[iter]]
-
-            print(keys[iter] + set_to_string(dic[keys[iter]]))
+            
+            print("{} {} {} {}".format(new_format(keys[iter]),dic[keys[iter]][0],dic[keys[iter]][1],dic[keys[iter]][2]))
+            
             iter += 1
             while (iter < len(keys) and count == new_dic[keys[iter]]):
-                print(keys[iter] + set_to_string(dic[keys[iter]]))
+                print("{} {} {} {}".format(new_format(keys[iter]), dic[keys[iter]]
+                      [0], dic[keys[iter]][1], dic[keys[iter]][2]))
                 iter += 1
 
             if iter >= len(keys):
@@ -52,7 +54,7 @@ class Spade:
         PQ = PriorityQueue()
         dic=defaultdict(list)
 
-        return self.depth1([], PosDatabase, NegDatabase, dic, PQ)
+        return self.depth1(tuple([]), PosDatabase, NegDatabase, dic, PQ,[])
         
 
     def get_feature_matrices(self):
@@ -83,15 +85,15 @@ class Spade:
             accuracy = metrics.accuracy_score(m['test_labels'], predicted)
             print(f'Accuracy: {accuracy}')
 
-    def depth1(self,sequence,PosDatabase,NegDatabase,dic,PQ):
+    def depth1(self,sequence,PosDatabase,NegDatabase,dic,PQ,support):
 
         
-        if sequence != []:
+        if sequence != tuple([]):
             
-            SupportPos = self.get_support(PosDatabase)
-            SupportNeg = self.get_support(NegDatabase)
+            SupportPos = support[0]
+            SupportNeg = support[1]
             
-            Support = SupportPos+SupportNeg
+            Support = support[2]
             
             if PQ.qsize() < self.k:
                 if Support not in PQ.queue:
@@ -102,27 +104,39 @@ class Spade:
             elif Support not in PQ.queue and PQ.queue[0] < Support:
                 PQ.get()
                 PQ.put(Support)
-                print(Support)
+                #print(Support)
+               
                 
-            dic[str(sequence)] = [SupportPos, SupportNeg, Support]
-        
+            dic[sequence] = [SupportPos, SupportNeg, Support]
+            NewPosDatabases = self.get_next_databases(
+                PosDatabase,  self.pos_transactions,sequence)
+            NewNegDatabases = self.get_next_databases(
+                NegDatabase,  self.neg_transactions,sequence)
 
-        
-            NewItems= self.get_next_items(PosDatabase,self.pos_transactions).union(self.get_next_items(NegDatabase,self.neg_transactions))
-        else:
-            NewItems = set()
+
+            NewSequences= set(NewPosDatabases.keys()).union(set(NewNegDatabases.keys()))
+        else: #case sequence = []
+            NewPosDatabases = defaultdict(list) 
             for item in self.pos_vertical.keys():
-                NewItems.add(item)
+                NewPosDatabases[tuple([item])]=self.pos_vertical[item]
+                
+            NewNegDatabases = defaultdict(list)
             for item in self.neg_vertical.keys():
-                NewItems.add(item)
+                NewNegDatabases[tuple([item])] = self.neg_vertical[item]
+                
+            NewSequences= set(NewPosDatabases.keys()).union(set(NewNegDatabases.keys()))
             
-        for item in NewItems:
-            new_sequence = sequence + [item]
+        SupportSequence= {}
+        for key in NewSequences:
+            pos_support = self.get_support(NewPosDatabases[key])
+            neg_support = self.get_support(NewNegDatabases[key])
+            tot_support = pos_support+neg_support
+            SupportSequence[key] = [pos_support,neg_support,tot_support]
             
-            NewPosDatabase = self.project(PosDatabase,item,self.pos_vertical)
-            NewNegDatabase = self.project(NegDatabase,item,self.neg_vertical)
+        SortedNewSequences = sorted(NewSequences, key=lambda x: SupportSequence[x][2], reverse=True)
+        for new_sequence in SortedNewSequences:
             
-            self.depth1(new_sequence,NewPosDatabase,NewNegDatabase,dic,PQ)
+            self.depth1(new_sequence,NewPosDatabases[new_sequence],NewNegDatabases[new_sequence],dic,PQ,SupportSequence[new_sequence])
         
         return dic
         
@@ -149,121 +163,17 @@ class Spade:
 
         return new_database
     
-    def get_next_items(self,database,transactions):
-        new_items = set()
+    def get_next_databases(self,database,transactions,sequence):
+        NewDatabases = defaultdict(list)
+
         for tid,pos in database:
-            for item in transactions[tid][pos+1:]:
-                new_items.add(item)
-        return new_items
 
-""""
-def depth(sequence, dic, PQ, pos_vertical, neg_vertical, pos_support, neg_support, k):
-
-    support = pos_support+neg_support
-
-    dic[str(sequence)] = [pos_support, neg_support, support]
-    items = get_set(pos_vertical, neg_vertical)
-
-    for item in items:
-        # print("test")
-        new_pos_support = get_support(item, pos_vertical)
-        new_neg_support = get_support(item, neg_vertical)
-
-        new_support = pos_support+neg_support
-        if PQ.qsize() == k:  # is the PQ full ?
-            current_lowest = PQ.queue[0]
-
-            if current_lowest > new_support:
-
-                return
-            else:
-                if new_support not in PQ.queue:
-                    PQ.get()
-                    PQ.put(new_support)
-        else:
-            if new_support not in PQ.queue:
-                PQ.put(new_support)
-
-        new_pos_vertical = get_new_vertical(
-            item, pos_vertical)
-
-        new_neg_vertical = get_new_vertical(
-            item, neg_vertical)
-
-        new_sequence = sequence + [item]
-
-        depth(new_sequence, dic, PQ, new_pos_vertical,
-              new_neg_vertical, new_pos_support, new_neg_support, k)
-
-    return dic
+            for i in range(pos+1,len(transactions[tid])):
+                new_sequences = sequence + tuple([transactions[tid][i]])
+                NewDatabases[new_sequences].append((tid, i))
+        return NewDatabases
 
 
-    
-
-def get_new_vertical(item, vertical):
-    new_vertical = defaultdict(list)
-    if vertical == None:
-        return None
-    if vertical.get(item) == None:  # if nothing for item than we can return None
-        return {}
-
-    occurence = vertical[item]
-    for key in vertical.keys():  # pour chaque clé du tableau vertical
-
-        i, j = 0, 0
-        while (i < len(occurence) and j < len(vertical[key])):
-
-            # delete
-            while (j < len(vertical[key]) and vertical[key][j][0] < occurence[i][0]):
-                j += 1
-            if j >= len(vertical[key]):
-                break
-
-            # same transaction
-            while (j < len(vertical[key]) and occurence[i][0] == vertical[key][j][0]):
-                if occurence[i][1] < vertical[key][j][1]:
-                    # copy.deepcopy(vertical[key][j])
-                    new_vertical[key].append(vertical[key][j])
-                j += 1
-            if j >= len(vertical[key]):
-                break
-
-            new_j = j
-            # find first element not in the same transaction
-            while (new_j < len(vertical[key]) and vertical[key][new_j][0] == occurence[i][0]):
-                new_j += 1
-            j = new_j
-
-            new_i = i+1
-            # find first element not in the same transaction
-            while (new_i < len(occurence) and occurence[new_i][0] == occurence[i][0]):
-                new_i += 1
-            i = new_i
-    return new_vertical
-
-
-def get_new_cover(item, vertical):
-    cover = set()
-    if vertical == None:
-        return None
-    if item not in vertical.keys():
-        return set()
-    for tuple in vertical[item]:
-        cover.add(tuple[0])
-    return cover
-
-
-def get_size(cover):
-    if cover == None:
-        return 0
-    return len(cover)
-
-
-def get_support(item, vertical):
-    cover = get_new_cover(item, vertical)
-    return get_size(cover)
-
-"""
 def get_transactions(filepath):
     transactions = []
     with open(filepath) as f:
@@ -309,7 +219,12 @@ def get_set(first_dic, second_dic):
             if second_dic[key] != [] and second_dic[key] != None:
                 items.add(key)
     return items
-
+def new_format(tuple):
+    
+    new_format=[]
+    for elem in tuple:
+        new_format.append(elem)
+    return new_format
 
 def test_Test():
     K = 3
@@ -334,9 +249,10 @@ def main():
 
 
 if __name__ == '__main__':
-    
+    """
     if len(sys.argv)==4:
         main()
     else:
         test_Test()
-    #main()
+    """    
+    main()
