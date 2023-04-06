@@ -3,7 +3,7 @@ import copy
 from queue import PriorityQueue
 from collections import defaultdict
 import heapq
-
+from sklearn import tree
 
 class Spade:
 
@@ -65,7 +65,6 @@ class Spade:
         
         k = 0
         keys = list(new_dic.keys())
-        
         iter = 0
         while (k < self.k):
 
@@ -98,7 +97,12 @@ class Spade:
         dic = defaultdict(list)
         BestQ = PriorityQueue()
         
-        self.BFS1(tuple([]), PosDatabase, NegDatabase, dic, PQ, [], BestQ, Wracc=Wracc)
+        
+        to_add=(-sys.maxsize,[tuple([]),len(self.pos_transactions), len(self.neg_transactions), len(self.pos_transactions)+len(self.neg_transactions)] )
+        if Wracc:
+           to_add[1].append( self.get_wracc(len(self.pos_transactions), len(self.neg_transactions)) ) 
+        BestQ.put(to_add)
+        self.BFS1(tuple([]), PosDatabase, NegDatabase, dic, PQ, BestQ, Wracc=Wracc)
         return dic
 
     def get_feature_matrices(self):
@@ -129,98 +133,84 @@ class Spade:
             accuracy = metrics.accuracy_score(m['test_labels'], predicted)
             print(f'Accuracy: {accuracy}')
 
-    def BFS1(self, sequence, PosDatabases, NegDatabases, dic, PQ, support, BestQ, Wracc=False):
+    def BFS1(self, sequence, PosDatabases, NegDatabases, dic, PQ,  BestQ, Wracc=False):
+        while(BestQ.empty() == False):
+            stored_tuple=BestQ.get()
+            score=-stored_tuple[0]
+            list_of_attributes=stored_tuple[1]
+            sequence=list_of_attributes[0]
+            support = list_of_attributes[1:]
+            
+            if sequence != tuple([]):
 
-        if sequence != tuple([]):
+                SupportPos = support[0]
+                SupportNeg = support[1]
 
-            SupportPos = support[0]
-            SupportNeg = support[1]
+                Support = support[2]
+                if Wracc == True:
+                    stop=self.wracc_PQ(PQ, support[3], SupportPos, SupportNeg)# support[3] is wracc
+                    if stop:
+                        continue
 
-            Support = support[2]
-            if Wracc == True:
-                stop=self.wracc_PQ(PQ, support[3], SupportPos, SupportNeg)# support[3] is wracc
-                if stop:
-                    if BestQ.empty():
-                        
-                        return dic
-                    next_candidate = BestQ.get()[1]
+                else:
+                    if PQ.qsize() < self.k:
+                        if Support not in PQ.queue:
+                            PQ.put(Support)
+                            
+                    elif Support < PQ.queue[0]:
+                        return
 
-                    key = next_candidate[0]
-
-                    self.BFS1(key, PosDatabases, NegDatabases,
-                            dic, PQ, next_candidate[1:], BestQ, Wracc=Wracc)
-                    return
-            else:
-                if PQ.qsize() < self.k:
-                    if Support not in PQ.queue:
+                    
+                    elif Support not in PQ.queue and PQ.queue[0] < Support:
+                        PQ.get()
                         PQ.put(Support)
                         
-                elif Support < PQ.queue[0]:
-                    return
 
-                
-                elif Support not in PQ.queue and PQ.queue[0] < Support:
-                    PQ.get()
-                    PQ.put(Support)
+                if Wracc:
+                    dic[sequence] = [SupportPos, SupportNeg, Support,
+                                    self.get_wracc(SupportPos, SupportNeg)]
+                else:
+                    dic[sequence] = [SupportPos, SupportNeg, Support]
                     
+                new_pos_keys = self.get_next_databases(
+                    sequence, PosDatabases,  self.pos_transactions, sequence)
+                new_neg_keys = self.get_next_databases(
+                    sequence, NegDatabases,  self.neg_transactions, sequence)
 
-            if Wracc:
-                dic[sequence] = [SupportPos, SupportNeg, Support,
-                                 self.get_wracc(SupportPos, SupportNeg)]
-            else:
-                dic[sequence] = [SupportPos, SupportNeg, Support]
-            new_pos_keys = self.get_next_databases(
-                sequence, PosDatabases,  self.pos_transactions, sequence)
-            new_neg_keys = self.get_next_databases(
-                sequence, NegDatabases,  self.neg_transactions, sequence)
-
-            NewSequences = set(new_pos_keys).union(set(new_neg_keys))
-            
-        else:  # case sequence = []
-            for item in self.pos_vertical.keys():
-                PosDatabases[tuple([item])] = self.pos_vertical[item]
-
-            for item in self.neg_vertical.keys():
-                NegDatabases[tuple([item])] = self.neg_vertical[item]
-
-            NewSequences = set(PosDatabases.keys()).union(
-                set(NegDatabases.keys()))
-            NewSequences.remove(tuple([]))
-        for key in NewSequences:
-            
-            pos_support = self.get_support(PosDatabases[key])
-            neg_support = self.get_support(NegDatabases[key])
-            tot_support = pos_support+neg_support
-            
-            if Wracc == False:
-                BestQ.put(
-                    (-tot_support, [key, pos_support, neg_support, tot_support]))
-            else:
-                wracc = self.get_wracc(pos_support, neg_support)
-                BestQ.put(
-                    (-wracc, [key, pos_support, neg_support, tot_support, wracc]))
+                NewSequences = set(new_pos_keys).union(set(new_neg_keys))
                 
+            else:  # case sequence = []
+                for item in self.pos_vertical.keys():
+                    PosDatabases[tuple([item])] = self.pos_vertical[item]
 
-        if BestQ.empty():
+                for item in self.neg_vertical.keys():
+                    NegDatabases[tuple([item])] = self.neg_vertical[item]
+
+                NewSequences = set(PosDatabases.keys()).union(
+                    set(NegDatabases.keys()))
+                NewSequences.remove(tuple([]))
+            for key in NewSequences:
+                
+                pos_support = self.get_support(PosDatabases[key])
+                neg_support = self.get_support(NegDatabases[key])
+                tot_support = pos_support+neg_support
+                
+                if Wracc == False:
+                    BestQ.put(
+                        (-tot_support, [key, pos_support, neg_support, tot_support]))
+                else:
+                    wracc = self.get_wracc(pos_support, neg_support)
+                    BestQ.put(
+                        (-wracc, [key, pos_support, neg_support, tot_support, wracc]))
+                    
             
-            return dic
-        next_candidate = BestQ.get()[1]
-        
-        key = next_candidate[0]
-
-        self.BFS1(key, PosDatabases, NegDatabases,
-                  dic, PQ, next_candidate[1:], BestQ, Wracc=Wracc)
-
         return dic
         
-
     def get_support(self, database):
         cover = set()
         for elem in database:
             cover.add(elem[0])
         return len(cover)
-
-
 
     def get_next_databases(self, key, database, transactions, sequence):
         new_keys = set()
@@ -343,8 +333,8 @@ def main():
     neg_filepath = sys.argv[2]
     K = int(sys.argv[3])
     s = Spade(pos_filepath, neg_filepath, K)
-    s.min_top_k_wracc()
-    #s.min_top_k()
+    #s.min_top_k_wracc()
+    s.min_top_k()
 
 
 if __name__ == '__main__':
